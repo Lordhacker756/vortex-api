@@ -1,0 +1,15 @@
+[package]
+name = "vortex-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+axum = "0.8.1"
+mongodb = "3.2.1"
+serde = "1.0.217"
+serde_json = "1.0.138"
+tokio = { version = "1.43.0", features = ["full"] }
+tower-http = "0.6.2"
+uuid = { version = "1.13.1", features = ["serde", "v4"] }
+webauthn-rs = "0.5.1"
