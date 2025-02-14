@@ -3,23 +3,23 @@ use serde::{Deserialize, Serialize};
 
 #[allow(non_snake_case)]
 #[derive(Debug, Serialize, Deserialize)]
-struct Poll {
-    pollId: String,
+pub struct Poll {
+    pub pollId: String,
     /// References UserId in the main collection
-    createdBy: String,
-    name: String,
-    isMulti: bool, //Allow multi-select
-    options: Option<Vec<PollOptions>>,
-    isPaused: bool,      //Pause the poll
-    startDate: DateTime, //Allow scheduling in future
-    endDate: DateTime,   //To close the poll
+    pub createdBy: String,
+    pub name: String,
+    pub isMulti: bool, //Allow multi-select
+    pub options: Option<Vec<PollOptions>>,
+    pub isPaused: bool,      //Pause the poll
+    pub startDate: DateTime, //Allow scheduling in future
+    pub endDate: DateTime,   //To close the poll
 }
 
 #[allow(non_snake_case)]
 #[derive(Debug, Serialize, Deserialize)]
-struct PollOptions {
+pub struct PollOptions {
     /// References pollId in the main collection
-    pollId: String,
-    optionName: String,
-    votes: i32,
+    pub pollId: String,
+    pub optionName: String,
+    pub votes: i32,
 }

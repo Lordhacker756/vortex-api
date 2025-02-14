@@ -1,9 +1,12 @@
 use axum::{response::IntoResponse, routing::get, Extension, Json, Router};
 use config::db;
 use dotenvy;
+use models::user::User;
+use repositories::{poll, user};
 use tower_http::trace::TraceLayer;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
+use uuid::Uuid;
 
 mod config;
 mod models;
@@ -38,6 +41,11 @@ async fn main() {
         .await
         .expect("Failed to initialize database");
     info!("successfully connected to database 🍀");
+
+    info!("Setting up user repository ㊫");
+    let user_repository = user::UserRepository::new(db.clone());
+    info!("Setting up poll repository 🗳️");
+    let poll_repository = poll::PollRepository::new(db.clone());
 
     let app = Router::new()
         .route("/api/healthchecker", get(health_checker_handler))

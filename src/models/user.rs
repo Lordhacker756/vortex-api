@@ -1,18 +1,18 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Credential {
-    credential_id: String,
-    public_key: String,
-    sign_count: u32,
-    attestation_format: String,
-    device_type: String,
-    created_at: chrono::DateTime<chrono::Utc>,
+pub struct Credential {
+    pub credential_id: String,
+    pub public_key: String,
+    pub sign_count: u32,
+    pub attestation_format: String,
+    pub device_type: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct User {
-    user_id: String,
-    username: String,
-    credentials: Vec<Credential>,
+pub struct User {
+    pub user_id: String,
+    pub username: String,
+    pub credentials: Option<Vec<Credential>>,
 }
