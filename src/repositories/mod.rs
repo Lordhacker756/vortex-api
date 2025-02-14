@@ -1,2 +1,2 @@
-pub mod user;
-pub mod poll;
+pub mod user_repository;
+pub mod poll_repository;
