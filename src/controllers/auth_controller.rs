@@ -13,8 +13,7 @@ use axum::{
 use chrono::Utc;
 use mongodb::Database;
 use tower_sessions::Session;
-use tracing::{error, warn};
-use tracing_log::log::info;
+use tracing::{error, info, warn};
 use webauthn_rs::prelude::*;
 
 use crate::config::startup::AppState;
@@ -135,18 +134,18 @@ pub async fn finish_register(
                             //? 1. Existing User
                             //append the new Passkey to their credentials vector and save it
                             user.credentials.push(sk.clone());
-                            println!("Passkey Added to User:: {:#?}", user);
+                            info!("Passkey Added to User:: {:#?}", user);
 
                             //Save this user
                             match user_repository
                                 .update_user(user.credentials, username.clone())
                                 .await
                             {
-                                Ok(res) => {
-                                    println!("New creds added to user!");
+                                Ok(_) => {
+                                    info!("New creds added to user!");
                                 }
                                 Err(e) => {
-                                    println!("Error updating user creds {:#?}", e.to_string());
+                                    error!("Error updating user creds {:#?}", e.to_string());
                                 }
                             }
                         }
@@ -167,7 +166,7 @@ pub async fn finish_register(
                     }
                 }
                 Err(e) => {
-                    println!("Error:: {:#?}", e.to_string())
+                    error!("Error:: {:#?}", e.to_string())
                 }
             }
 
@@ -220,23 +219,27 @@ pub async fn initiate_login(
     // Get the set of keys that the user possesses
     let mut users_guard = app_state.users.lock().await;
 
-    println!("Finding user by username {}", &query.username);
+    info!("Finding user by username {}", &query.username);
     // Look up their unique id from the username
     let user_unique_id = match users_guard.name_to_id.get(&query.username).copied() {
         Some(id) => id,
         None => {
-            println!("User not found in apstate, checking db");
+            info!("User not found in apstate, checking db");
             // User wasn't there in memory, let's check the db for the same
-            match user_repository.get_user_by_username(query.username.clone()).await {
+            match user_repository
+                .get_user_by_username(query.username.clone())
+                .await
+            {
                 Ok(Some(user)) => {
-                     println!("Found user by username {:#?}", user);
-                let uuid = Uuid::parse_str(&user.user_id).map_err(|_| WebauthnError::Unknown)?;
-                
-                // Update the in-memory state with the user's credentials
-                users_guard.name_to_id.insert(query.username, uuid);
-                users_guard.keys.insert(uuid, user.credentials);
-                
-                uuid
+                    info!("Found user by username with user_id {:#?}", user.user_id);
+                    let uuid =
+                        Uuid::parse_str(&user.user_id).map_err(|_| WebauthnError::Unknown)?;
+
+                    // Update the in-memory state with the user's credentials
+                    users_guard.name_to_id.insert(query.username, uuid);
+                    users_guard.keys.insert(uuid, user.credentials);
+
+                    uuid
                 }
                 Ok(None) => return Err(WebauthnError::UserNotFound),
                 Err(_) => return Err(WebauthnError::Unknown),

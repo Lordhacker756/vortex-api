@@ -1,5 +1,4 @@
 use anyhow::Error;
-use serde_json::json;
 use std::sync::Arc;
 use webauthn_rs::prelude::Passkey;
 
