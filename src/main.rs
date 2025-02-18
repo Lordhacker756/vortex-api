@@ -28,7 +28,6 @@ mod error;
 mod models;
 mod repositories;
 mod routes;
-
 use crate::routes::auth_route::auth_router;
 use config::startup::AppState;
 
@@ -49,7 +48,7 @@ async fn main() {
 
     // Initialize logging
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO) // Change to TRACE level
+        .with_max_level(Level::TRACE) // Change to TRACE level
         .with_level(true)
         .with_line_number(true)
         .pretty()

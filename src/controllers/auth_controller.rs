@@ -3,18 +3,15 @@ use std::sync::Arc;
 use crate::{
     dtos::requests::RegisterQuery,
     error::WebauthnError,
-    models::user::{Credential, User},
-    repositories::user_repository,
+    models::user::User,
+    repositories::user_repository::{self, UserRepository},
 };
 use axum::{
     extract::{Extension, Json, Query},
-    http::StatusCode,
     response::IntoResponse,
 };
 use chrono::Utc;
 use mongodb::Database;
-use serde::Serialize;
-use serde_json::Serializer;
 use tower_sessions::Session;
 use tracing::{error, warn};
 use tracing_log::log::info;
@@ -58,9 +55,7 @@ pub async fn initiate_register(
         })
     };
 
-    // Add session ID logging
-    let session_id = session.id();
-
+    // Get the CCR and send to the user, while also saving it to session to verify later
     let res = match app_state.webauthn.start_passkey_registration(
         user_unique_id,
         &query.username,
@@ -130,27 +125,50 @@ pub async fn finish_register(
         Ok(sk) => {
             let mut users_guard = app_state.users.lock().await;
 
-            // Create a new Credential
-            let credential = Credential {
-                credential_id: base64::encode(sk.cred_id()),
-                public_key: sk.get_public_key().key.clone(),
-                sign_count: 0,
-                device_type: "passkey".to_string(),
-                created_at: Utc::now(),
-            };
-
-            // Create a new User
-            let user = User {
-                user_id: user_unique_id.to_string(),
-                username: username.clone(),
-                credentials: Some(vec![credential]),
-            };
-
-            // Save to MongoDB
+            //TODO Check if the user is creating a new passkey or it's a new user
             let user_repository = user_repository::UserRepository::new(db);
-            if let Err(e) = user_repository.create_user(user).await {
-                error!("Failed to save user to database: {:?}", e);
-                return Err(WebauthnError::Unknown);
+
+            match user_repository.get_user_by_username(username.clone()).await {
+                Ok(res) => {
+                    match res {
+                        Some(mut user) => {
+                            //? 1. Existing User
+                            //append the new Passkey to their credentials vector and save it
+                            user.credentials.push(sk.clone());
+                            println!("Passkey Added to User:: {:#?}", user);
+
+                            //Save this user
+                            match user_repository
+                                .update_user(user.credentials, username.clone())
+                                .await
+                            {
+                                Ok(res) => {
+                                    println!("New creds added to user!");
+                                }
+                                Err(e) => {
+                                    println!("Error updating user creds {:#?}", e.to_string());
+                                }
+                            }
+                        }
+                        None => {
+                            //* 2. New User
+                            // Create a new User
+                            let user = User {
+                                user_id: user_unique_id.to_string(),
+                                username: username.clone(),
+                                credentials: vec![sk.clone()],
+                            };
+
+                            if let Err(e) = user_repository.create_user(user).await {
+                                error!("Failed to save user to database: {:?}", e);
+                                return Err(WebauthnError::Unknown);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Error:: {:#?}", e.to_string())
+                }
             }
 
             // Update in-memory state
@@ -185,6 +203,7 @@ pub async fn finish_register(
 /// # Returns
 /// Result containing the authentication challenge (CCR)
 pub async fn initiate_login(
+    Extension(db): Extension<Arc<Database>>,
     Extension(app_state): Extension<AppState>,
     session: Session,
     Query(query): Query<RegisterQuery>,
@@ -196,15 +215,34 @@ pub async fn initiate_login(
     // Remove any previous authentication that may have occured from the session.
     let _ = session.remove_value("auth_state").await;
 
-    // Get the set of keys that the user possesses
-    let users_guard = app_state.users.lock().await;
+    let user_repository = UserRepository::new(db);
 
+    // Get the set of keys that the user possesses
+    let mut users_guard = app_state.users.lock().await;
+
+    println!("Finding user by username {}", &query.username);
     // Look up their unique id from the username
-    let user_unique_id = users_guard
-        .name_to_id
-        .get(&query.username)
-        .copied()
-        .ok_or(WebauthnError::UserNotFound)?;
+    let user_unique_id = match users_guard.name_to_id.get(&query.username).copied() {
+        Some(id) => id,
+        None => {
+            println!("User not found in apstate, checking db");
+            // User wasn't there in memory, let's check the db for the same
+            match user_repository.get_user_by_username(query.username.clone()).await {
+                Ok(Some(user)) => {
+                     println!("Found user by username {:#?}", user);
+                let uuid = Uuid::parse_str(&user.user_id).map_err(|_| WebauthnError::Unknown)?;
+                
+                // Update the in-memory state with the user's credentials
+                users_guard.name_to_id.insert(query.username, uuid);
+                users_guard.keys.insert(uuid, user.credentials);
+                
+                uuid
+                }
+                Ok(None) => return Err(WebauthnError::UserNotFound),
+                Err(_) => return Err(WebauthnError::Unknown),
+            }
+        }
+    };
 
     let allow_credentials = users_guard
         .keys
