@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     dtos::requests::RegisterQuery,
-    error::WebauthnError,
+    error::{AppError, WebauthnError},
     models::user::User,
     repositories::user_repository::{self, UserRepository},
 };
@@ -28,7 +28,7 @@ pub async fn initiate_register(
     Extension(app_state): Extension<AppState>,
     session: Session,
     Query(query): Query<RegisterQuery>,
-) -> Result<impl IntoResponse, WebauthnError> {
+) -> Result<impl IntoResponse, AppError> {
     info!("Starting register");
 
     //getting a unique user_id
@@ -69,16 +69,13 @@ pub async fn initiate_register(
             session
                 .insert("reg_state", session_data)
                 .await
-                .map_err(|e| {
-                    error!("Failed to save to session: {:?}", e);
-                    WebauthnError::Unknown
-                })?;
+                .map_err(|e| AppError::InvalidSessionState(e))?;
 
             Ok(Json(ccr))
         }
         Err(e) => {
             warn!("Error in registering challenge -> {:#?}", e);
-            Err(WebauthnError::Unknown)
+            Err(AppError::Webauthn(WebauthnError::InvalidCredential))
         }
     };
 
@@ -98,20 +95,17 @@ pub async fn finish_register(
     Extension(db): Extension<Arc<Database>>,
     session: Session,
     Json(reg): Json<RegisterPublicKeyCredential>,
-) -> Result<impl IntoResponse, WebauthnError> {
+) -> Result<impl IntoResponse, AppError> {
     let reg_state_result = session
         .get::<(String, Uuid, PasskeyRegistration)>("reg_state")
-        .await;
+        .await
+        .map_err(AppError::InvalidSessionState)?;
 
     let (username, user_unique_id, reg_state) = match reg_state_result {
-        Ok(Some(state_data)) => state_data,
-        Ok(None) => {
+        Some(state_data) => state_data,
+        None => {
             error!("No registration state found in session");
-            return Err(WebauthnError::CorruptSession);
-        }
-        Err(e) => {
-            error!("Failed to deserialize session data: {:?}", e);
-            return Err(WebauthnError::CorruptSession);
+            return Err(AppError::Webauthn(WebauthnError::CorruptSession));
         }
     };
 
@@ -160,13 +154,14 @@ pub async fn finish_register(
 
                             if let Err(e) = user_repository.create_user(user).await {
                                 error!("Failed to save user to database: {:?}", e);
-                                return Err(WebauthnError::Unknown);
+                                return Err(AppError::Webauthn(WebauthnError::Unknown));
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    error!("Error:: {:#?}", e.to_string())
+                    error!("Database error: {}", e);
+                    return Err(AppError::DatabaseError(e.to_string()));
                 }
             }
 
@@ -206,7 +201,7 @@ pub async fn initiate_login(
     Extension(app_state): Extension<AppState>,
     session: Session,
     Query(query): Query<RegisterQuery>,
-) -> Result<impl IntoResponse, WebauthnError> {
+) -> Result<impl IntoResponse, AppError> {
     info!("Start Authentication");
     // We get the username from the URL, but you could get this via form submission or
     // some other process.
@@ -241,8 +236,8 @@ pub async fn initiate_login(
 
                     uuid
                 }
-                Ok(None) => return Err(WebauthnError::UserNotFound),
-                Err(_) => return Err(WebauthnError::Unknown),
+                Ok(None) => return Err(AppError::UserNotFound),
+                Err(e) => return Err(AppError::DatabaseError(e.to_string())),
             }
         }
     };
@@ -250,7 +245,7 @@ pub async fn initiate_login(
     let allow_credentials = users_guard
         .keys
         .get(&user_unique_id)
-        .ok_or(WebauthnError::UserHasNoCredentials)?;
+        .ok_or(AppError::Webauthn(WebauthnError::UserHasNoCredentials))?;
 
     let res = match app_state
         .webauthn
@@ -271,7 +266,7 @@ pub async fn initiate_login(
         }
         Err(e) => {
             info!("challenge_authenticate -> {:?}", e);
-            return Err(WebauthnError::Unknown);
+            return Err(AppError::Webauthn(WebauthnError::Unknown));
         }
     };
     Ok(res)
@@ -288,11 +283,12 @@ pub async fn verify_and_login(
     Extension(app_state): Extension<AppState>,
     session: Session,
     Json(auth): Json<PublicKeyCredential>,
-) -> Result<impl IntoResponse, WebauthnError> {
+) -> Result<impl IntoResponse, AppError> {
     let (user_unique_id, auth_state): (Uuid, PasskeyAuthentication) = session
         .get("auth_state")
-        .await?
-        .ok_or(WebauthnError::CorruptSession)?;
+        .await
+        .map_err(AppError::InvalidSessionState)?
+        .ok_or(AppError::Webauthn(WebauthnError::CorruptSession))?;
 
     let _ = session.remove_value("auth_state").await;
 
@@ -312,7 +308,7 @@ pub async fn verify_and_login(
                         sk.update_credential(&auth_result);
                     })
                 })
-                .ok_or(WebauthnError::UserHasNoCredentials)?;
+                .ok_or(AppError::Webauthn(WebauthnError::UserHasNoCredentials))?;
 
             info!("Authentication Successful!");
             Json(serde_json::json!({
@@ -324,12 +320,7 @@ pub async fn verify_and_login(
         }
         Err(e) => {
             error!("Authentication failed: {:?}", e);
-            Json(serde_json::json!({
-                "status": 400,
-                "message": "Authentication failed",
-                "error": format!("{:?}", e),
-                "timestamp": Utc::now().to_rfc3339()
-            }))
+            return Err(AppError::AuthenticationFailed);
         }
     };
 
