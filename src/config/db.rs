@@ -1,8 +1,9 @@
 use mongodb::{Client, Database};
 use std::{env, sync::Arc};
-use tracing::error;
+use tracing::{error, info};
 
 pub async fn init_database() -> mongodb::error::Result<Arc<Database>> {
+    info!("connecting to database");
     let mongo_uri = env::var("MONGO_URI").map_err(|_| {
         error!("MONGO_URI not found in environment variables");
         mongodb::error::Error::from(std::io::Error::new(
