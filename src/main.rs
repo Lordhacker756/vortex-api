@@ -4,6 +4,7 @@ use config::{
 };
 use dotenvy;
 
+use routes::poll_route::poll_router;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -36,6 +37,7 @@ async fn main() {
 
     let app = Router::new()
         .nest("/auth", auth_router())
+        .nest("/polls", poll_router())
         .layer(init_session())
         .layer(TraceLayer::new_for_http())
         .layer(Extension(db))
