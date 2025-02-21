@@ -57,6 +57,7 @@ pub struct PollResponseDTO {
     pub start_date: String,
     pub end_date: String,
     pub options: Vec<PollOptionResponseDTO>,
+    pub voted_by: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

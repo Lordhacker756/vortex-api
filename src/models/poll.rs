@@ -16,6 +16,7 @@ pub struct Poll {
     pub startDate: DateTime,      //Allow scheduling in future
     pub endDate: DateTime,        //To close the poll
     pub options: Vec<PollOption>, // Embedded options
+    pub votedBy: Vec<String>,
 }
 
 #[allow(non_snake_case)]
@@ -37,6 +38,7 @@ impl Poll {
             is_closed: self.isClosed,
             start_date: self.startDate.to_string(),
             end_date: self.endDate.to_string(),
+            voted_by: self.votedBy,
             options: self
                 .options
                 .into_iter()

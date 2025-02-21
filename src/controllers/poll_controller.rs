@@ -133,14 +133,47 @@ pub async fn cast_vote(
     Extension(db): Extension<Arc<Database>>,
     Path(poll_id): Path<String>,
     Query(query): Query<VoteQueryParam>,
+    session: Session,
 ) -> Result<Json<ApiResponse<PollResponseDTO>>, AppError> {
     let poll_repository = poll_repository::PollRepository::new(db);
-    let updated_poll = poll_repository.cast_vote(poll_id, query.optionId).await?;
+    let updated_poll = poll_repository
+        .cast_vote(poll_id, query.optionId, session)
+        .await?;
 
     Ok(Json(ApiResponse {
         status: http::StatusCode::OK.as_u16() as i32,
         message: String::from("Vote cast successfully"),
         data: Some(updated_poll),
+        timestamp: Utc::now(),
+        error: None,
+    }))
+}
+
+pub async fn can_user_vote(
+    Extension(db): Extension<Arc<Database>>,
+    Path(poll_id): Path<String>,
+    session: Session, // Add session parameter
+) -> Result<Json<ApiResponse<bool>>, AppError> {
+    let poll_repository = poll_repository::PollRepository::new(db);
+
+    // Get user_id from session
+    let user_id = session
+        .get::<String>("user_id")
+        .await
+        .map_err(|e| AppError::InvalidSessionState(e))?
+        .ok_or(AppError::AuthenticationFailed)?;
+
+    let can_vote = poll_repository.can_vote(user_id, poll_id).await?;
+
+    Ok(Json(ApiResponse {
+        status: if can_vote {
+            StatusCode::OK
+        } else {
+            StatusCode::FORBIDDEN
+        }
+        .as_u16() as i32,
+        message: if can_vote { "Can vote" } else { "Cannot vote" }.to_string(),
+        data: Some(can_vote),
         timestamp: Utc::now(),
         error: None,
     }))

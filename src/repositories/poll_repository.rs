@@ -13,6 +13,7 @@ use axum::{http::StatusCode, Json};
 use chrono::Utc;
 use futures::TryStreamExt;
 use mongodb::{bson::DateTime as BsonDateTime, Collection};
+use tower_sessions::{session, Session};
 use tracing::info;
 use uuid::Uuid;
 
@@ -108,6 +109,7 @@ impl PollRepository {
             isPaused: false,
             isClosed: false,
             options: poll_options,
+            votedBy: [].to_vec(),
         };
 
         info!("Inserting new poll to db {:#?}", new_poll.pollId);
@@ -137,26 +139,114 @@ impl PollRepository {
 
     pub async fn get_poll_by_id(
         &self,
-        pollId: String,
+        poll_id: String,
     ) -> Result<Option<PollResponseDTO>, AppError> {
         let poll = self
             .polls
-            .find_one(mongodb::bson::doc! { "pollId": pollId })
+            .find_one(mongodb::bson::doc! { "pollId": poll_id })
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         Ok(poll.map(|p| p.to_response_dto()))
     }
 
+    pub async fn can_vote(&self, user_id: String, poll_id: String) -> Result<bool, AppError> {
+        match self.get_poll_by_id(poll_id).await {
+            Ok(Some(poll)) => {
+                // Check if user has already voted
+                let has_voted = poll.voted_by.contains(&user_id);
+                Ok(!has_voted)
+            }
+            Ok(None) => Err(AppError::Poll(PollsError::PollNotFound)),
+            Err(e) => Err(AppError::DatabaseError(e.to_string())),
+        }
+    }
+
+    // pub async fn can_vote(
+    //     &self,
+    //     poll_id: String,
+    //     session: Session,
+    // ) -> Result<ApiResponse<bool>, AppError> {
+    //     let poll = self
+    //         .get_poll_by_id(poll_id.clone())
+    //         .await?
+    //         .ok_or(AppError::Poll(PollsError::PollNotFound))?;
+
+    //     let user_id: String = session
+    //         .get("user_id")
+    //         .await
+    //         .map_err(|e| AppError::InvalidSessionState(e))?
+    //         .ok_or(AppError::AuthenticationFailed)?;
+
+    //     // Check if poll is closed
+    //     if poll.is_closed {
+    //         return Ok(ApiResponse {
+    //             status: StatusCode::FORBIDDEN.as_u16() as i32,
+    //             message: "Poll is closed".to_string(),
+    //             data: Some(false),
+    //             timestamp: Utc::now(),
+    //             error: None,
+    //         });
+    //     }
+
+    //     // Check if poll is paused
+    //     if poll.is_paused {
+    //         return Ok(ApiResponse {
+    //             status: StatusCode::FORBIDDEN.as_u16() as i32,
+    //             message: "Poll is paused".to_string(),
+    //             data: Some(false),
+    //             timestamp: Utc::now(),
+    //             error: None,
+    //         });
+    //     }
+
+    //     // Check if poll has started
+    //     if poll.start_date > BsonDateTime::now() {
+    //         return Ok(ApiResponse {
+    //             status: StatusCode::FORBIDDEN.as_u16() as i32,
+    //             message: "Poll has not started yet".to_string(),
+    //             data: Some(false),
+    //             timestamp: Utc::now(),
+    //             error: None,
+    //         });
+    //     }
+
+    //     // Check if user has already voted
+    //     let has_voted = poll.voted_by.contains(&user_id);
+
+    //     Ok(ApiResponse {
+    //         status: if has_voted {
+    //             StatusCode::FORBIDDEN.as_u16() as i32
+    //         } else {
+    //             StatusCode::OK.as_u16() as i32
+    //         },
+    //         message: if has_voted {
+    //             "Already voted".to_string()
+    //         } else {
+    //             "Can vote".to_string()
+    //         },
+    //         data: None,
+    //         timestamp: Utc::now(),
+    //         error: None,
+    //     })
+    // }
+
     pub async fn cast_vote(
         &self,
         poll_id: String,
         option_id: String,
+        session: Session,
     ) -> Result<PollResponseDTO, AppError> {
         let poll = self
             .get_poll_by_id(poll_id.clone())
             .await?
             .ok_or(AppError::Poll(PollsError::PollNotFound))?;
+
+        let user_id: String = session
+            .get("user_id")
+            .await
+            .map_err(|e| AppError::InvalidSessionState(e))?
+            .ok_or(AppError::AuthenticationFailed)?; // Handle case where user_id is not in session
 
         if poll.is_closed {
             return Err(AppError::Poll(PollsError::PollClosed));
@@ -164,6 +254,10 @@ impl PollRepository {
 
         if poll.is_paused {
             return Err(AppError::Poll(PollsError::PollPaused));
+        }
+
+        if let Ok(false) = self.can_vote(user_id.clone(), poll_id.clone()).await {
+            return Err(AppError::Poll(PollsError::AlreadyVoted));
         }
 
         let update_result = self
@@ -176,6 +270,9 @@ impl PollRepository {
                 mongodb::bson::doc! {
                     "$inc": {
                         "options.$.votes": 1
+                    },
+                    "$push": {
+                        "votedBy": user_id
                     }
                 },
             )
