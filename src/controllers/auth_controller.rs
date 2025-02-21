@@ -310,6 +310,12 @@ pub async fn verify_and_login(
                 })
                 .ok_or(AppError::Webauthn(WebauthnError::UserHasNoCredentials))?;
 
+            // Store the user_id in the session after successful authentication
+            session
+                .insert("user_id", user_unique_id.to_string())
+                .await
+                .map_err(|e| AppError::InvalidSessionState(e))?;
+
             info!("Authentication Successful!");
             Json(serde_json::json!({
                 "status": 200,
