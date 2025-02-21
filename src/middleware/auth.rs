@@ -5,7 +5,7 @@ pub async fn require_login(
     mut req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, &'static str)> {
-    println!("Incoming request:: {:#?}", req);
+    // println!("Incoming request:: {:#?}", req);
     let session = req
         .extensions()
         .get::<Session>()

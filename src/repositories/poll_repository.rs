@@ -16,6 +16,7 @@ use mongodb::{bson::DateTime as BsonDateTime, Collection};
 use tracing::info;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct PollRepository {
     polls: Collection<Poll>,
 }

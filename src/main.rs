@@ -38,9 +38,9 @@ async fn main() {
     let app_state = AppState::new();
 
     let app = Router::new()
-        .nest("/auth", auth_router())
+        .nest("/api/auth", auth_router())
         .nest(
-            "/polls",
+            "/api/polls",
             poll_router().route_layer(axum::middleware::from_fn(require_login)),
         )
         .layer(init_session())
