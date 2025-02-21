@@ -2,7 +2,7 @@ use std::{convert::Infallible, sync::Arc, time::Duration};
 
 use axum::{
     extract::{Path, Query},
-    http,
+    http::{self, StatusCode},
     response::{sse::Event, Sse},
     Extension, Json,
 };
@@ -11,23 +11,63 @@ use axum_extra::{headers, TypedHeader};
 use chrono::Utc;
 use mongodb::Database;
 use tokio_stream::{Stream, StreamExt};
-use tower_sessions::Session;
-
-use crate::{dtos::responses::PollResponseDTO, error::{AppError, PollsError}};
+use tower_sessions::{session, Session, SessionManager};
 
 use crate::{
     dtos::{
-        requests::CreatePollDTO,
-        responses::ApiResponse,
+        requests::UpdatePollDTO,
+        responses::{PollOptionResponseDTO, PollResponseDTO},
     },
+    error::{AppError, PollsError},
+    models::poll,
+};
+
+use crate::{
+    dtos::{requests::CreatePollDTO, responses::ApiResponse},
     repositories::poll_repository,
 };
 
 //*GET:: api/polls
-pub async fn get_all_polls() {}
-
+pub async fn get_all_polls(
+    Extension(db): Extension<Arc<Database>>,
+) -> Result<Json<ApiResponse<Vec<PollResponseDTO>>>, AppError> {
+    let poll_repository = poll_repository::PollRepository::new(db);
+    match poll_repository.get_all_polls().await {
+        Ok(polls) => Ok(Json(ApiResponse {
+            status: StatusCode::OK.as_u16() as i32,
+            message: String::from("All posts fetched successfully"),
+            data: Some(polls),
+            timestamp: Utc::now(),
+            error: None,
+        })),
+        Err(e) => Err(AppError::DatabaseError(e.to_string())),
+    }
+}
 //*GET:: api/polls/manage
-pub async fn manage_all_polls() {}
+pub async fn manage_all_polls(
+    Extension(db): Extension<Arc<Database>>,
+    session: Session,
+) -> Result<Json<ApiResponse<Vec<PollResponseDTO>>>, AppError> {
+    let poll_repository = poll_repository::PollRepository::new(db);
+    let user_id = session
+        .get::<String>("user_id")
+        .await
+        .map_err(|e| AppError::SessionExpired)?
+        .ok_or(AppError::AuthenticationFailed)?;
+
+    let polls = poll_repository
+        .get_polls_of_user(user_id)
+        .await?
+        .ok_or(AppError::Poll(PollsError::NoPollsFoundForUser))?;
+
+    Ok(Json(ApiResponse {
+        status: StatusCode::OK.as_u16() as i32,
+        message: String::from("User polls fetched successfully"),
+        data: Some(polls),
+        timestamp: Utc::now(),
+        error: None,
+    }))
+}
 
 //?POST:: api/polls
 pub async fn create_new_poll(
@@ -65,6 +105,25 @@ pub async fn get_poll_by_id(
         timestamp: Utc::now(),
         error: None,
     }))
+}
+
+//?PATCH:: api/polls/poll_id
+pub async fn update_poll_by_id(
+    Extension(db): Extension<Arc<Database>>,
+    Path(poll_id): Path<String>,
+    axum::Json(payload): axum::Json<UpdatePollDTO>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let poll_repository = poll_repository::PollRepository::new(db);
+    match poll_repository.update_poll(poll_id, payload).await {
+        Ok(_) => Ok(Json(ApiResponse {
+            status: StatusCode::CREATED.as_u16() as i32,
+            message: String::from("Poll updated successfully"),
+            data: None,
+            timestamp: Utc::now(),
+            error: None,
+        })),
+        Err(e) => Err(e),
+    }
 }
 
 //*GET:: api/polls/poll_id/vote

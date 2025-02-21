@@ -30,3 +30,12 @@ pub struct CreatePollDTO {
 
     pub options: Vec<String>,
 }
+
+#[allow(non_snake_case)]
+#[derive(Deserialize, Clone)]
+pub struct UpdatePollDTO {
+    pub name: String,
+    pub isMulti: bool,
+    pub startDate: DateTime<Utc>,
+    pub endDate: DateTime<Utc>,
+}

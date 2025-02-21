@@ -2,10 +2,15 @@
 use std::sync::Arc;
 
 use crate::{
-    dtos::{requests::CreatePollDTO, responses::PollResponseDTO},
+    dtos::{
+        requests::{CreatePollDTO, UpdatePollDTO},
+        responses::{ApiResponse, PollResponseDTO},
+    },
     error::{AppError, PollsError},
     models::poll::{Poll, PollOption},
 };
+use axum::{http::StatusCode, Json};
+use chrono::Utc;
 use futures::TryStreamExt;
 use mongodb::{bson::DateTime as BsonDateTime, Collection};
 use tracing::info;
@@ -19,6 +24,62 @@ impl PollRepository {
     pub fn new(db: Arc<mongodb::Database>) -> Self {
         let polls = db.collection::<Poll>("polls");
         Self { polls }
+    }
+
+    pub async fn update_poll(&self, poll_id: String, poll: UpdatePollDTO) -> Result<(), AppError> {
+        // First check if poll exists and is not closed
+        let _existing_poll = self
+            .get_poll_by_id(poll_id.clone())
+            .await?
+            .ok_or(AppError::Poll(PollsError::PollNotFound))?;
+
+        let update_result = self
+            .polls
+            .update_one(
+                mongodb::bson::doc! { "pollId": poll_id },
+                mongodb::bson::doc! {
+                    "$set": {
+                    "name": poll.name,
+                    "isMulti": poll.isMulti,
+                    "startDate": BsonDateTime::from_millis(poll.startDate.timestamp_millis()),
+                    "endDate": BsonDateTime::from_millis(poll.endDate.timestamp_millis())
+                    }
+                },
+            )
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+        if update_result.modified_count == 0 {
+            return Err(AppError::Poll(PollsError::PollNotFound));
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_polls_of_user(
+        &self,
+        user_id: String,
+    ) -> Result<Option<Vec<PollResponseDTO>>, AppError> {
+        match self
+            .polls
+            .find(mongodb::bson::doc! {
+                "createdBy": user_id
+            })
+            .await
+        {
+            Ok(res) => {
+                let polls = res
+                    .try_collect::<Vec<Poll>>()
+                    .await
+                    .map_err(|e| AppError::DatabaseError(e.to_string()))?
+                    .into_iter()
+                    .map(|poll| poll.to_response_dto())
+                    .collect();
+
+                Ok(Some(polls))
+            }
+            Err(e) => Err(AppError::DatabaseError(e.to_string())),
+        }
     }
 
     pub async fn create_poll(&self, dto: CreatePollDTO) -> Result<PollResponseDTO, AppError> {

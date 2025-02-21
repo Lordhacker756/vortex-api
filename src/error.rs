@@ -47,6 +47,9 @@ pub enum AppError {
 
 #[derive(Error, Debug)]
 pub enum PollsError {
+    #[error("The user hasn't created any polls")]
+    NoPollsFoundForUser,
+
     #[error("Poll not found")]
     PollNotFound,
 
@@ -145,6 +148,10 @@ impl IntoResponse for AppError {
 
             // Poll Errors
             AppError::Poll(poll_err) => match poll_err {
+                PollsError::NoPollsFoundForUser => (
+                    StatusCode::NOT_FOUND,
+                    "No polls found have been created by the given user",
+                ),
                 PollsError::PollNotFound => (StatusCode::NOT_FOUND, "Poll Not Found"),
                 PollsError::PollEnded => (StatusCode::FORBIDDEN, "Poll Has Already Ended"),
                 PollsError::PollPaused => (StatusCode::FORBIDDEN, "Poll Is Currently Paused"),
