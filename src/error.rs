@@ -39,6 +39,49 @@ pub enum AppError {
     // Webauthn Specific Errors
     #[error("Webauthn error: {0}")]
     Webauthn(#[from] WebauthnError),
+
+    // Poll Errors
+    #[error("Poll error: {0}")]
+    Poll(#[from] PollsError),
+}
+
+#[derive(Error, Debug)]
+pub enum PollsError {
+    #[error("Poll not found")]
+    PollNotFound,
+
+    #[error("Poll has already ended")]
+    PollEnded,
+
+    #[error("Poll is currently paused")]
+    PollPaused,
+
+    #[error("Poll has been closed")]
+    PollClosed,
+
+    #[error("Invalid poll option")]
+    InvalidPollOption,
+
+    #[error("User has already voted on this poll")]
+    AlreadyVoted,
+
+    #[error("Invalid poll dates: {0}")]
+    InvalidPollDates(String),
+
+    #[error("Poll creation failed: {0}")]
+    CreationFailed(String),
+
+    #[error("Invalid poll configuration: {0}")]
+    InvalidConfiguration(String),
+
+    #[error("Unauthorized to manage this poll")]
+    UnauthorizedAccess,
+
+    #[error("Poll update failed: {0}")]
+    UpdateFailed(String),
+
+    #[error("Cannot modify closed poll")]
+    CannotModifyClosed,
 }
 
 #[derive(Error, Debug)]
@@ -97,6 +140,32 @@ impl IntoResponse for AppError {
                 }
                 WebauthnError::InvalidAttestation => {
                     (StatusCode::BAD_REQUEST, "Invalid Attestation")
+                }
+            },
+
+            // Poll Errors
+            AppError::Poll(poll_err) => match poll_err {
+                PollsError::PollNotFound => (StatusCode::NOT_FOUND, "Poll Not Found"),
+                PollsError::PollEnded => (StatusCode::FORBIDDEN, "Poll Has Already Ended"),
+                PollsError::PollPaused => (StatusCode::FORBIDDEN, "Poll Is Currently Paused"),
+                PollsError::PollClosed => (StatusCode::FORBIDDEN, "Poll Has Been Closed"),
+                PollsError::InvalidPollOption => (StatusCode::BAD_REQUEST, "Invalid Poll Option"),
+                PollsError::AlreadyVoted => (StatusCode::CONFLICT, "Already Voted On This Poll"),
+                PollsError::InvalidPollDates(_) => (StatusCode::BAD_REQUEST, "Invalid Poll Dates"),
+                PollsError::CreationFailed(_) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Failed To Create Poll")
+                }
+                PollsError::InvalidConfiguration(_) => {
+                    (StatusCode::BAD_REQUEST, "Invalid Poll Configuration")
+                }
+                PollsError::UnauthorizedAccess => {
+                    (StatusCode::FORBIDDEN, "Unauthorized To Manage Poll")
+                }
+                PollsError::UpdateFailed(_) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Failed To Update Poll")
+                }
+                PollsError::CannotModifyClosed => {
+                    (StatusCode::FORBIDDEN, "Cannot Modify Closed Poll")
                 }
             },
 
