@@ -10,6 +10,5 @@ pub fn init_session() -> SessionManagerLayer<MemoryStore> {
         .with_same_site(SameSite::None)
         .with_secure(true)
         .with_path("/")
-        .with_domain("vortex-api-koba.onrender.com")
         .with_expiry(Expiry::OnInactivity(Duration::seconds(3600)))
 }
