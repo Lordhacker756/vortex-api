@@ -332,3 +332,13 @@ pub async fn verify_and_login(
 
     Ok(res)
 }
+
+pub async fn logout(session: Session) -> Result<impl IntoResponse, AppError> {
+    // Destroy the session
+    session.delete().await?;
+
+    Ok(Json(serde_json::json!({
+        "status": 200,
+        "message": "Logged out successfully"
+    })))
+}
