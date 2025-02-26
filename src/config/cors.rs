@@ -1,7 +1,7 @@
 use axum::http::HeaderName;
+use axum::http::Method;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
-use axum::http::Method;
 
 pub fn init_cors() -> CorsLayer {
     CorsLayer::new()
@@ -14,6 +14,6 @@ pub fn init_cors() -> CorsLayer {
             HeaderName::from_static("cookie"),
         ])
         .allow_origin(["https://votx.vercel.app".parse().unwrap()])
-        .expose_headers([axum::http::header::SET_COOKIE])
+        .expose_headers([axum::http::header::SET_COOKIE, axum::http::header::COOKIE])
         .max_age(Duration::from_secs(86400))
 }
