@@ -21,7 +21,7 @@ pub fn init_cors() -> CorsLayer {
             axum::http::header::COOKIE,
         ])
         .allow_credentials(true)
-        .allow_origin(["http://localhost:8000".parse::<HeaderValue>().unwrap()])
+        .allow_origin(["https://votx.vercel.app".parse::<HeaderValue>().unwrap()])
         .expose_headers([axum::http::header::SET_COOKIE]);
 
     cors
