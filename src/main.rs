@@ -4,6 +4,8 @@ use config::{
 };
 use dotenvy;
 
+use middleware::auth::require_login;
+use routes::poll_route::poll_router;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -11,6 +13,7 @@ mod config;
 mod controllers;
 mod dtos;
 mod error;
+mod middleware;
 mod models;
 mod repositories;
 mod routes;
@@ -35,7 +38,11 @@ async fn main() {
     let app_state = AppState::new();
 
     let app = Router::new()
-        .nest("/auth", auth_router())
+        .nest("/api/auth", auth_router())
+        .nest(
+            "/api/polls",
+            poll_router().route_layer(axum::middleware::from_fn(require_login)),
+        )
         .layer(init_session())
         .layer(TraceLayer::new_for_http())
         .layer(Extension(db))

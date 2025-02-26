@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::controllers::auth_controller::{
-    finish_register, initiate_login, initiate_register, verify_and_login,
+    finish_register, initiate_login, initiate_register, logout, verify_and_login,
 };
 
 pub fn auth_router() -> Router {
@@ -13,4 +13,5 @@ pub fn auth_router() -> Router {
         .route("/verify-login", post(verify_and_login))
         .route("/register", get(initiate_register))
         .route("/verify-register", post(finish_register))
+        .route("/logout", post(logout))
 }
