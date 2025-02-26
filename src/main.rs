@@ -49,8 +49,9 @@ async fn main() {
         .layer(Extension(app_state))
         .layer(init_cors());
 
-    info!("🚀 Server started successfully at port 9000");
-    let listener = tokio::net::TcpListener::bind("localhost:9000")
+    let port = std::env::var("PORT").unwrap_or_else(|_| "9000".to_string());
+    info!("🚀 Server started successfully at port {}", port);
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
         .unwrap();
     axum::serve(listener, app).await.unwrap()
