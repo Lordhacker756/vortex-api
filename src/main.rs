@@ -43,11 +43,11 @@ async fn main() {
             "/api/polls",
             poll_router().route_layer(axum::middleware::from_fn(require_login)),
         )
+        .layer(init_cors())
         .layer(init_session())
         .layer(TraceLayer::new_for_http())
         .layer(Extension(db))
-        .layer(Extension(app_state))
-        .layer(init_cors());
+        .layer(Extension(app_state));
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "9000".to_string());
     info!("🚀 Server started successfully at port {}", port);
