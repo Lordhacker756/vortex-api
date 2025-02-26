@@ -9,8 +9,6 @@ pub struct RegisterQuery {
 #[derive(Deserialize, Clone)]
 pub struct ResultQueryParams {
     pub live: Option<bool>,
-    pub closed: Option<bool>,
-    pub creator: Option<String>,
 }
 
 #[allow(non_snake_case)]

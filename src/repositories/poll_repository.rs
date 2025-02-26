@@ -4,16 +4,14 @@ use std::sync::Arc;
 use crate::{
     dtos::{
         requests::{CreatePollDTO, UpdatePollDTO},
-        responses::{ApiResponse, PollResponseDTO},
+        responses::PollResponseDTO,
     },
     error::{AppError, PollsError},
     models::poll::{Poll, PollOption},
 };
-use axum::{http::StatusCode, Json};
-use chrono::Utc;
 use futures::TryStreamExt;
 use mongodb::{bson::DateTime as BsonDateTime, Collection};
-use tower_sessions::{session, Session};
+use tower_sessions::Session;
 use tracing::info;
 use uuid::Uuid;
 
@@ -124,8 +122,10 @@ impl PollRepository {
         let polls = self
             .polls
             .find(mongodb::bson::doc! {})
+            .sort(mongodb::bson::doc! { "startDate": -1 }) // -1 for descending order
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
         let poll_list: Vec<PollResponseDTO> = polls
             .try_collect::<Vec<Poll>>()
             .await
@@ -161,75 +161,6 @@ impl PollRepository {
             Err(e) => Err(AppError::DatabaseError(e.to_string())),
         }
     }
-
-    // pub async fn can_vote(
-    //     &self,
-    //     poll_id: String,
-    //     session: Session,
-    // ) -> Result<ApiResponse<bool>, AppError> {
-    //     let poll = self
-    //         .get_poll_by_id(poll_id.clone())
-    //         .await?
-    //         .ok_or(AppError::Poll(PollsError::PollNotFound))?;
-
-    //     let user_id: String = session
-    //         .get("user_id")
-    //         .await
-    //         .map_err(|e| AppError::InvalidSessionState(e))?
-    //         .ok_or(AppError::AuthenticationFailed)?;
-
-    //     // Check if poll is closed
-    //     if poll.is_closed {
-    //         return Ok(ApiResponse {
-    //             status: StatusCode::FORBIDDEN.as_u16() as i32,
-    //             message: "Poll is closed".to_string(),
-    //             data: Some(false),
-    //             timestamp: Utc::now(),
-    //             error: None,
-    //         });
-    //     }
-
-    //     // Check if poll is paused
-    //     if poll.is_paused {
-    //         return Ok(ApiResponse {
-    //             status: StatusCode::FORBIDDEN.as_u16() as i32,
-    //             message: "Poll is paused".to_string(),
-    //             data: Some(false),
-    //             timestamp: Utc::now(),
-    //             error: None,
-    //         });
-    //     }
-
-    //     // Check if poll has started
-    //     if poll.start_date > BsonDateTime::now() {
-    //         return Ok(ApiResponse {
-    //             status: StatusCode::FORBIDDEN.as_u16() as i32,
-    //             message: "Poll has not started yet".to_string(),
-    //             data: Some(false),
-    //             timestamp: Utc::now(),
-    //             error: None,
-    //         });
-    //     }
-
-    //     // Check if user has already voted
-    //     let has_voted = poll.voted_by.contains(&user_id);
-
-    //     Ok(ApiResponse {
-    //         status: if has_voted {
-    //             StatusCode::FORBIDDEN.as_u16() as i32
-    //         } else {
-    //             StatusCode::OK.as_u16() as i32
-    //         },
-    //         message: if has_voted {
-    //             "Already voted".to_string()
-    //         } else {
-    //             "Can vote".to_string()
-    //         },
-    //         data: None,
-    //         timestamp: Utc::now(),
-    //         error: None,
-    //     })
-    // }
 
     pub async fn cast_vote(
         &self,

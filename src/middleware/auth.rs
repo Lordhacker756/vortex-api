@@ -2,7 +2,7 @@ use axum::{extract::Request, http::StatusCode, middleware::Next, response::Respo
 use tower_sessions::Session;
 
 pub async fn require_login(
-    mut req: Request,
+    req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, &'static str)> {
     // println!("Incoming request:: {:#?}", req);

@@ -1,4 +1,4 @@
-use std::{convert::Infallible, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     extract::{Path, Query},
@@ -6,21 +6,18 @@ use axum::{
     response::{sse::Event, IntoResponse, Response, Sse},
     Extension, Json,
 };
-use axum_extra::{headers, TypedHeader};
 
 use chrono::Utc;
 use mongodb::Database;
 use tokio_stream::{Stream, StreamExt};
-use tower_sessions::{session, Session, SessionManager};
-use tracing_subscriber::filter;
+use tower_sessions::Session;
 
 use crate::{
     dtos::{
         requests::{ResultQueryParams, UpdatePollDTO, VoteQueryParam},
-        responses::{PollOptionResponseDTO, PollResponseDTO},
+        responses::PollResponseDTO,
     },
     error::{AppError, PollsError},
-    models::poll,
     repositories::poll_repository::PollRepository,
 };
 
@@ -54,7 +51,7 @@ pub async fn manage_all_polls(
     let user_id = session
         .get::<String>("user_id")
         .await
-        .map_err(|e| AppError::SessionExpired)?
+        .map_err(|_e| AppError::SessionExpired)?
         .ok_or(AppError::AuthenticationFailed)?;
 
     let polls = poll_repository
