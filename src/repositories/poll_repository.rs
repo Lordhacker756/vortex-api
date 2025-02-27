@@ -11,7 +11,6 @@ use crate::{
 };
 use futures::TryStreamExt;
 use mongodb::{bson::DateTime as BsonDateTime, Collection};
-use tower_sessions::Session;
 use tracing::info;
 use uuid::Uuid;
 
@@ -166,18 +165,12 @@ impl PollRepository {
         &self,
         poll_id: String,
         option_id: String,
-        session: Session,
+        user_id: String, // Now directly takes user_id instead of session
     ) -> Result<PollResponseDTO, AppError> {
         let poll = self
             .get_poll_by_id(poll_id.clone())
             .await?
             .ok_or(AppError::Poll(PollsError::PollNotFound))?;
-
-        let user_id: String = session
-            .get("user_id")
-            .await
-            .map_err(|e| AppError::InvalidSessionState(e))?
-            .ok_or(AppError::AuthenticationFailed)?; // Handle case where user_id is not in session
 
         if poll.is_closed {
             return Err(AppError::Poll(PollsError::PollClosed));
@@ -217,6 +210,16 @@ impl PollRepository {
         self.get_poll_by_id(poll_id)
             .await?
             .ok_or(AppError::Poll(PollsError::PollNotFound))
+    }
+
+    // Add new method to verify poll ownership
+    pub async fn verify_poll_owner(&self, poll_id: &str, user_id: &str) -> Result<bool, AppError> {
+        let poll = self
+            .get_poll_by_id(poll_id.to_string())
+            .await?
+            .ok_or(AppError::Poll(PollsError::PollNotFound))?;
+
+        Ok(poll.created_by == user_id)
     }
 
     pub async fn close_poll(&self, poll_id: String) -> Result<PollResponseDTO, AppError> {
