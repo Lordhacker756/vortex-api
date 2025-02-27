@@ -18,7 +18,7 @@ pub struct VoteQueryParam {
 }
 
 #[allow(non_snake_case)]
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct CreatePollDTO {
     pub name: String,
     pub isMulti: bool,

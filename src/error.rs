@@ -51,6 +51,9 @@ pub enum AppError {
 
 #[derive(Error, Debug)]
 pub enum PollsError {
+    #[error("You're not authorized to perform this action for this poll")]
+    Unauthorized,
+
     #[error("The user hasn't created any polls")]
     NoPollsFoundForUser,
 
@@ -109,6 +112,8 @@ pub enum WebauthnError {
 
 #[derive(Error, Debug)]
 pub enum JwtError {
+    #[error("Invalid JWT token")]
+    InvalidToken,
     #[error("Token creation failed")]
     TokenCreationError,
     #[error("Invalid token format")]
@@ -166,6 +171,10 @@ impl IntoResponse for AppError {
 
             // Poll Errors
             AppError::Poll(poll_err) => match poll_err {
+                PollsError::Unauthorized => (
+                    StatusCode::FORBIDDEN,
+                    "You're not authorized to perform this action on this poll"
+                ),
                 PollsError::NoPollsFoundForUser => (
                     StatusCode::NOT_FOUND,
                     "No polls found have been created by the given user",
@@ -196,6 +205,10 @@ impl IntoResponse for AppError {
 
             // JWT Errors
             AppError::JwtError(jwt_err) => match jwt_err {
+                JwtError::InvalidToken => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Invalid JWT token provided",
+                ),
                 JwtError::TokenCreationError => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to create authentication token",
@@ -204,14 +217,10 @@ impl IntoResponse for AppError {
                     StatusCode::UNAUTHORIZED,
                     "Invalid authentication token format",
                 ),
-                JwtError::TokenExpired => (
-                    StatusCode::UNAUTHORIZED,
-                    "Authentication token has expired",
-                ),
-                JwtError::InvalidSignature => (
-                    StatusCode::UNAUTHORIZED,
-                    "Invalid token signature",
-                ),
+                JwtError::TokenExpired => {
+                    (StatusCode::UNAUTHORIZED, "Authentication token has expired")
+                }
+                JwtError::InvalidSignature => (StatusCode::UNAUTHORIZED, "Invalid token signature"),
                 JwtError::MissingSecret => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Authentication system configuration error",
