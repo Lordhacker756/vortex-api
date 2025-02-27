@@ -26,14 +26,11 @@ use webauthn_rs::prelude::*;
 use crate::config::startup::AppState;
 
 // Type alias for our custom response type
-type AuthResponse = (HeaderMap, Json<serde_json::Value>);
+type AuthResponse = Json<serde_json::Value>;
 
 // Helper function to create consistent response type
-fn create_auth_response(
-    headers: HeaderMap,
-    body: serde_json::Value,
-) -> Result<AuthResponse, AppError> {
-    Ok((headers, Json(body)))
+fn create_auth_response(body: serde_json::Value) -> Result<AuthResponse, AppError> {
+    Ok(Json(body))
 }
 
 fn get_jwt_secret() -> Result<Vec<u8>, AppError> {
@@ -230,26 +227,20 @@ pub async fn finish_register(
             // Generate JWT token
             let jwt_secret = get_jwt_secret()?;
             let token = create_token(&user_unique_id.to_string(), &jwt_secret)?;
-            let headers = set_auth_cookie(&token);
 
-            create_auth_response(
-                headers,
-                serde_json::json!({
-                    "status": 200,
-                    "message": "Registration completed successfully",
-                    "user_id": user_unique_id.to_string()
-                }),
-            )
+            create_auth_response(serde_json::json!({
+                "status": 200,
+                "message": "Registration completed successfully",
+                "user_id": user_unique_id.to_string(),
+                "token": token
+            }))
         }
         Err(e) => {
             error!("challenge_register -> {:?}", e);
-            create_auth_response(
-                HeaderMap::new(),
-                serde_json::json!({
-                    "status": 400,
-                    "message": e.to_string()
-                }),
-            )
+            create_auth_response(serde_json::json!({
+                "status": 400,
+                "message": e.to_string()
+            }))
         }
     };
 
@@ -410,17 +401,14 @@ pub async fn verify_and_login(
             // Generate JWT token
             let jwt_secret = get_jwt_secret()?;
             let token = create_token(&auth_state.user_unique_id, &jwt_secret)?;
-            let headers = set_auth_cookie(&token);
 
-            create_auth_response(
-                headers,
-                serde_json::json!({
-                    "status": 200,
-                    "message": "Login successful",
-                    "user_id": auth_state.user_unique_id,
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
+            create_auth_response(serde_json::json!({
+                "status": 200,
+                "message": "Login successful",
+                "user_id": auth_state.user_unique_id,
+                "token": token,
+                "timestamp": Utc::now().to_rfc3339()
+            }))
         }
         Err(e) => {
             error!("Authentication failed: {:?}", e);
@@ -432,35 +420,8 @@ pub async fn verify_and_login(
 }
 
 pub async fn logout() -> Result<AuthResponse, AppError> {
-    let headers = clear_auth_cookie();
-
-    create_auth_response(
-        headers,
-        serde_json::json!({
-            "status": 200,
-            "message": "Logged out successfully"
-        }),
-    )
-}
-
-fn set_auth_cookie(token: &str) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    // Remove SameSite=None to prevent cookie issues
-    let cookie = format!(
-        "authToken={}; HttpOnly; Path=/; Secure; Max-Age=604800",
-        token
-    );
-    headers.insert(SET_COOKIE, cookie.parse().unwrap());
-    headers
-}
-
-fn clear_auth_cookie() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        SET_COOKIE,
-        "authToken=; HttpOnly; Path=/; Secure; Max-Age=0"
-            .parse()
-            .unwrap(),
-    );
-    headers
+    create_auth_response(serde_json::json!({
+        "status": 200,
+        "message": "Logged out successfully"
+    }))
 }

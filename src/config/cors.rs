@@ -4,11 +4,7 @@ use std::time::Duration;
 use tower_http::cors::CorsLayer;
 
 pub fn init_cors() -> CorsLayer {
-    let allowed_origins = [
-        "http://localhost:3000",
-        "http://localhost:8000",
-        "https://votx.vercel.app",
-    ];
+    let allowed_origins = ["http://localhost:8000", "https://votx.vercel.app"];
 
     CorsLayer::new()
         .allow_credentials(true)
