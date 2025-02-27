@@ -15,12 +15,11 @@ use crate::{
 };
 use axum::{
     extract::{Extension, Json, Path, Query},
-    http::{header::SET_COOKIE, HeaderMap, Response, StatusCode},
+    http::{header::SET_COOKIE, HeaderMap},
     response::IntoResponse,
 };
 use chrono::Utc;
 use mongodb::Database;
-use tower_sessions::Session;
 use tracing::{error, info, warn};
 use webauthn_rs::prelude::*;
 
