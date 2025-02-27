@@ -13,7 +13,10 @@ pub fn init_cors() -> CorsLayer {
             HeaderName::from_static("x-csrf-token"),
             HeaderName::from_static("cookie"),
         ])
-        .allow_origin(["https://votx.vercel.app".parse().unwrap()])
+        .allow_origin([
+            "http://localhost:8000".parse().unwrap(),
+            "https://votx.vercel.app".parse().unwrap(),
+        ])
         .expose_headers([axum::http::header::SET_COOKIE, axum::http::header::COOKIE])
         .max_age(Duration::from_secs(86400))
 }
