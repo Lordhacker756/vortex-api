@@ -445,8 +445,9 @@ pub async fn logout() -> Result<AuthResponse, AppError> {
 
 fn set_auth_cookie(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
+    // Remove SameSite=None to prevent cookie issues
     let cookie = format!(
-        "authToken={}; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=604800",
+        "authToken={}; HttpOnly; Path=/; Secure; Max-Age=604800",
         token
     );
     headers.insert(SET_COOKIE, cookie.parse().unwrap());
@@ -457,7 +458,7 @@ fn clear_auth_cookie() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
         SET_COOKIE,
-        "authToken=; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=0"
+        "authToken=; HttpOnly; Path=/; Secure; Max-Age=0"
             .parse()
             .unwrap(),
     );
