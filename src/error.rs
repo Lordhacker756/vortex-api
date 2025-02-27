@@ -43,6 +43,10 @@ pub enum AppError {
     // Poll Errors
     #[error("Poll error: {0}")]
     Poll(#[from] PollsError),
+
+    // JWT Errors
+    #[error("JWT error: {0}")]
+    JwtError(#[from] JwtError),
 }
 
 #[derive(Error, Debug)]
@@ -101,6 +105,20 @@ pub enum WebauthnError {
     ChallengeVerificationFailed,
     #[error("Invalid attestation")]
     InvalidAttestation,
+}
+
+#[derive(Error, Debug)]
+pub enum JwtError {
+    #[error("Token creation failed")]
+    TokenCreationError,
+    #[error("Invalid token format")]
+    InvalidTokenFormat,
+    #[error("Token expired")]
+    TokenExpired,
+    #[error("Invalid token signature")]
+    InvalidSignature,
+    #[error("Missing JWT secret")]
+    MissingSecret,
 }
 
 impl IntoResponse for AppError {
@@ -174,6 +192,30 @@ impl IntoResponse for AppError {
                 PollsError::CannotModifyClosed => {
                     (StatusCode::FORBIDDEN, "Cannot Modify Closed Poll")
                 }
+            },
+
+            // JWT Errors
+            AppError::JwtError(jwt_err) => match jwt_err {
+                JwtError::TokenCreationError => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create authentication token",
+                ),
+                JwtError::InvalidTokenFormat => (
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid authentication token format",
+                ),
+                JwtError::TokenExpired => (
+                    StatusCode::UNAUTHORIZED,
+                    "Authentication token has expired",
+                ),
+                JwtError::InvalidSignature => (
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid token signature",
+                ),
+                JwtError::MissingSecret => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Authentication system configuration error",
+                ),
             },
 
             AppError::Unknown => (StatusCode::INTERNAL_SERVER_ERROR, "Unknown Error"),

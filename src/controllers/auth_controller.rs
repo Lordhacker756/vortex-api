@@ -2,21 +2,48 @@ use std::sync::Arc;
 
 use crate::{
     dtos::requests::RegisterQuery,
-    error::{AppError, WebauthnError},
-    models::user::User,
-    repositories::user_repository::{self, UserRepository},
+    error::{AppError, JwtError, WebauthnError},
+    models::{
+        registration_state::{AuthenticationState, RegistrationState},
+        user::User,
+    },
+    repositories::{
+        registration_state_repository::RegistrationStateRepository,
+        user_repository::{self, UserRepository},
+    },
+    utils::jwt::create_token,
 };
 use axum::{
-    extract::{Extension, Json, Query},
+    extract::{Extension, Json, Path, Query},
+    http::{header::SET_COOKIE, HeaderMap},
     response::IntoResponse,
 };
 use chrono::Utc;
 use mongodb::Database;
-use tower_sessions::Session;
 use tracing::{error, info, warn};
 use webauthn_rs::prelude::*;
 
 use crate::config::startup::AppState;
+
+// Type alias for our custom response type
+type AuthResponse = (HeaderMap, Json<serde_json::Value>);
+
+// Helper function to create consistent response type
+fn create_auth_response(
+    headers: HeaderMap,
+    body: serde_json::Value,
+) -> Result<AuthResponse, AppError> {
+    Ok((headers, Json(body)))
+}
+
+fn get_jwt_secret() -> Result<Vec<u8>, AppError> {
+    std::env::var("JWT_SECRET")
+        .map(|s| s.into_bytes())
+        .map_err(|e| {
+            error!("Failed to get JWT_SECRET: {}", e);
+            AppError::JwtError(JwtError::MissingSecret)
+        })
+}
 
 /// Creates a CCR (Client Certification Request) and registration state.
 /// Stores the registration state and sends the CCR to the user for signature.
@@ -26,7 +53,7 @@ use crate::config::startup::AppState;
 #[axum::debug_handler]
 pub async fn initiate_register(
     Extension(app_state): Extension<AppState>,
-    session: Session,
+    Extension(db): Extension<Arc<Database>>,
     Query(query): Query<RegisterQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     info!("Starting register");
@@ -40,9 +67,6 @@ pub async fn initiate_register(
             .copied()
             .unwrap_or_else(Uuid::new_v4)
     };
-
-    //remove any previous registration states
-    let _ = session.remove_value("reg_state").await;
 
     //exclude existing credentials
     let excluded_credentials = {
@@ -62,14 +86,27 @@ pub async fn initiate_register(
         excluded_credentials,
     ) {
         Ok((ccr, reg_state)) => {
-            // Store the data with explicit typing
-            let session_data: (String, Uuid, PasskeyRegistration) =
-                (query.username.clone(), user_unique_id, reg_state);
+            // Store registration state in MongoDB
+            let reg_state_repo = RegistrationStateRepository::new(db);
+            let registration_state = RegistrationState {
+                username: query.username.clone(),
+                user_unique_id: user_unique_id.to_string(),
+                reg_state,
+                created_at: Utc::now(),
+            };
 
-            session
-                .insert("reg_state", session_data)
+            println!(
+                "Saving user reg state {} {}",
+                registration_state.username, registration_state.user_unique_id
+            );
+
+            if let Err(e) = reg_state_repo
+                .save_registration_state(registration_state)
                 .await
-                .map_err(|e| AppError::InvalidSessionState(e))?;
+            {
+                error!("Failed to save registration state: {:?}", e);
+                return Err(AppError::DatabaseError(e.to_string()));
+            }
 
             Ok(Json(ccr))
         }
@@ -93,27 +130,43 @@ pub async fn initiate_register(
 pub async fn finish_register(
     Extension(app_state): Extension<AppState>,
     Extension(db): Extension<Arc<Database>>,
-    session: Session,
+    Path(username): Path<String>,
     Json(reg): Json<RegisterPublicKeyCredential>,
-) -> Result<impl IntoResponse, AppError> {
-    let reg_state_result = session
-        .get::<(String, Uuid, PasskeyRegistration)>("reg_state")
-        .await
-        .map_err(AppError::InvalidSessionState)?;
+) -> Result<AuthResponse, AppError> {
+    let reg_state_repo = RegistrationStateRepository::new(db.clone());
 
-    let (username, user_unique_id, reg_state) = match reg_state_result {
-        Some(state_data) => state_data,
-        None => {
-            error!("No registration state found in session");
+    // Instead of getting from app state, first try to get the registration state
+    let reg_state = match reg_state_repo
+        .get_and_delete_registration_state(&username) // Pass empty string for user_id
+        .await
+    {
+        Ok(Some(state)) => state,
+        Ok(None) => {
+            error!("No registration state found for username {}", username);
             return Err(AppError::Webauthn(WebauthnError::CorruptSession));
+        }
+        Err(e) => {
+            error!("Database error while fetching registration state: {}", e);
+            return Err(AppError::DatabaseError(e.to_string()));
         }
     };
 
-    let _ = session.remove_value("reg_state").await;
+    // Use the user_unique_id from the registration state
+    let user_unique_id = Uuid::parse_str(&reg_state.user_unique_id)
+        .map_err(|_| AppError::Webauthn(WebauthnError::CorruptSession))?;
+
+    // Verify only the username since we're getting user_id from reg_state
+    if reg_state.username != username {
+        error!(
+            "Registration state username mismatch. Expected: {}, Found: {}",
+            username, reg_state.username
+        );
+        return Err(AppError::Webauthn(WebauthnError::CorruptSession));
+    }
 
     let res = match app_state
         .webauthn
-        .finish_passkey_registration(&reg, &reg_state)
+        .finish_passkey_registration(&reg, &reg_state.reg_state)
     {
         Ok(sk) => {
             let mut users_guard = app_state.users.lock().await;
@@ -174,22 +227,33 @@ pub async fn finish_register(
 
             users_guard.name_to_id.insert(username, user_unique_id);
 
-            info!("User registration completed successfully");
-            Json(serde_json::json!({
-                "status": 200,
-                "message": "Registration completed successfully"
-            }))
+            // Generate JWT token
+            let jwt_secret = get_jwt_secret()?;
+            let token = create_token(&user_unique_id.to_string(), &jwt_secret)?;
+            let headers = set_auth_cookie(&token);
+
+            create_auth_response(
+                headers,
+                serde_json::json!({
+                    "status": 200,
+                    "message": "Registration completed successfully",
+                    "user_id": user_unique_id.to_string()
+                }),
+            )
         }
         Err(e) => {
             error!("challenge_register -> {:?}", e);
-            Json(serde_json::json!({
-                "status": 400,
-                "message": "Bad request"
-            }))
+            create_auth_response(
+                HeaderMap::new(),
+                serde_json::json!({
+                    "status": 400,
+                    "message": e.to_string()
+                }),
+            )
         }
     };
 
-    Ok(res)
+    res
 }
 
 /// Initiates the login process by creating necessary challenge and maintaining a reg_state
@@ -199,17 +263,11 @@ pub async fn finish_register(
 pub async fn initiate_login(
     Extension(db): Extension<Arc<Database>>,
     Extension(app_state): Extension<AppState>,
-    session: Session,
     Query(query): Query<RegisterQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     info!("Start Authentication");
-    // We get the username from the URL, but you could get this via form submission or
-    // some other process.
 
-    // Remove any previous authentication that may have occured from the session.
-    let _ = session.remove_value("auth_state").await;
-
-    let user_repository = UserRepository::new(db);
+    let user_repository = UserRepository::new(db.clone());
 
     // Get the set of keys that the user possesses
     let mut users_guard = app_state.users.lock().await;
@@ -252,16 +310,21 @@ pub async fn initiate_login(
         .start_passkey_authentication(allow_credentials)
     {
         Ok((rcr, auth_state)) => {
-            // Drop the mutex to allow the mut borrows below to proceed
-            drop(users_guard);
+            let reg_state_repo = RegistrationStateRepository::new(db);
+            let authentication_state = AuthenticationState {
+                user_unique_id: user_unique_id.to_string(),
+                auth_state,
+                created_at: Utc::now(),
+            };
 
-            // Note that due to the session store in use being a server side memory store, this is
-            // safe to store the auth_state into the session since it is not client controlled and
-            // not open to replay attacks. If this was a cookie store, this would be UNSAFE.
-            session
-                .insert("auth_state", (user_unique_id, auth_state))
+            if let Err(e) = reg_state_repo
+                .save_authentication_state(authentication_state)
                 .await
-                .expect("Failed to insert");
+            {
+                error!("Failed to save authentication state: {:?}", e);
+                return Err(AppError::DatabaseError(e.to_string()));
+            }
+
             Json(rcr)
         }
         Err(e) => {
@@ -281,20 +344,54 @@ pub async fn initiate_login(
 /// Result containing the authentication token upon successful login
 pub async fn verify_and_login(
     Extension(app_state): Extension<AppState>,
-    session: Session,
+    Extension(db): Extension<Arc<Database>>,
+    Path(username): Path<String>,
     Json(auth): Json<PublicKeyCredential>,
-) -> Result<impl IntoResponse, AppError> {
-    let (user_unique_id, auth_state): (Uuid, PasskeyAuthentication) = session
-        .get("auth_state")
-        .await
-        .map_err(AppError::InvalidSessionState)?
-        .ok_or(AppError::Webauthn(WebauthnError::CorruptSession))?;
+) -> Result<AuthResponse, AppError> {
+    let reg_state_repo = RegistrationStateRepository::new(db);
 
-    let _ = session.remove_value("auth_state").await;
+    let user_unique_id = {
+        let user_guard = app_state.users.lock().await;
+        match user_guard.name_to_id.get(&username) {
+            Some(id) => *id,
+            None => {
+                error!("User not found in app state: {}", username);
+                return Err(AppError::UserNotFound);
+            }
+        }
+    };
+
+    let auth_state = match reg_state_repo
+        .get_and_delete_authentication_state(&user_unique_id.to_string())
+        .await
+    {
+        Ok(Some(state)) => {
+            // Verify the user_id matches
+            if state.user_unique_id != user_unique_id.to_string() {
+                error!(
+                    "Authentication state mismatch for user_id {}",
+                    user_unique_id
+                );
+                return Err(AppError::Webauthn(WebauthnError::CorruptSession));
+            }
+            state
+        }
+        Ok(None) => {
+            error!(
+                "No authentication state found for user_id {}",
+                user_unique_id
+            );
+            return Err(AppError::Webauthn(WebauthnError::CorruptSession));
+        }
+        Err(e) => {
+            error!("Database error while fetching authentication state: {}", e);
+            return Err(AppError::DatabaseError(e.to_string()));
+        }
+    };
 
     let res = match app_state
         .webauthn
-        .finish_passkey_authentication(&auth, &auth_state)
+        .finish_passkey_authentication(&auth, &auth_state.auth_state)
     {
         Ok(auth_result) => {
             let mut users_guard = app_state.users.lock().await;
@@ -310,19 +407,20 @@ pub async fn verify_and_login(
                 })
                 .ok_or(AppError::Webauthn(WebauthnError::UserHasNoCredentials))?;
 
-            // Store the user_id in the session after successful authentication
-            session
-                .insert("user_id", user_unique_id.to_string())
-                .await
-                .map_err(|e| AppError::InvalidSessionState(e))?;
+            // Generate JWT token
+            let jwt_secret = get_jwt_secret()?;
+            let token = create_token(&auth_state.user_unique_id, &jwt_secret)?;
+            let headers = set_auth_cookie(&token);
 
-            info!("Authentication Successful!");
-            Json(serde_json::json!({
-                "status": 200,
-                "message": "Login successful",
-                "user_id": user_unique_id.to_string(),
-                "timestamp": Utc::now().to_rfc3339()
-            }))
+            create_auth_response(
+                headers,
+                serde_json::json!({
+                    "status": 200,
+                    "message": "Login successful",
+                    "user_id": auth_state.user_unique_id,
+                    "timestamp": Utc::now().to_rfc3339()
+                }),
+            )
         }
         Err(e) => {
             error!("Authentication failed: {:?}", e);
@@ -330,15 +428,38 @@ pub async fn verify_and_login(
         }
     };
 
-    Ok(res)
+    res
 }
 
-pub async fn logout(session: Session) -> Result<impl IntoResponse, AppError> {
-    // Destroy the session
-    session.delete().await?;
+pub async fn logout() -> Result<AuthResponse, AppError> {
+    let headers = clear_auth_cookie();
 
-    Ok(Json(serde_json::json!({
-        "status": 200,
-        "message": "Logged out successfully"
-    })))
+    create_auth_response(
+        headers,
+        serde_json::json!({
+            "status": 200,
+            "message": "Logged out successfully"
+        }),
+    )
+}
+
+fn set_auth_cookie(token: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    let cookie = format!(
+        "authToken={}; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=604800",
+        token
+    );
+    headers.insert(SET_COOKIE, cookie.parse().unwrap());
+    headers
+}
+
+fn clear_auth_cookie() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        SET_COOKIE,
+        "authToken=; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=0"
+            .parse()
+            .unwrap(),
+    );
+    headers
 }

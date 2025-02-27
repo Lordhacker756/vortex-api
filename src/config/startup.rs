@@ -31,10 +31,12 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         // Effective domain name.
+        // let rp_id = "localhost";
         let rp_id = "votx.vercel.app";
         // Url containing the effective domain name
         // MUST include the port number!
         let rp_origin = Url::parse("https://votx.vercel.app").expect("Invalid URL");
+        // let rp_origin = Url::parse("http://localhost:8000").expect("Invalid URL");
         let builder = WebauthnBuilder::new(rp_id, &rp_origin).expect("Invalid configuration");
 
         // Now, with the builder you can define other options.
