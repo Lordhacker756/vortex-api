@@ -262,16 +262,21 @@ pub async fn get_poll_result(
     Extension(db): Extension<Arc<Database>>,
     Path(poll_id): Path<String>,
     Query(filters): Query<ResultQueryParams>,
+    TypedHeader(authorization): TypedHeader<Authorization<Bearer>>,
 ) -> Result<Response, AppError> {
     let poll_repository = poll_repository::PollRepository::new(db);
+
+    // Validate the authentication token
+    let user_id = get_user_id_from_token(authorization.token()).await?;
+
     // There are 3 cases to get the results
     //* Live results -> Stream The Votes of the given poll_id
     if let Some(true) = filters.live {
-        Ok(start_sse(poll_repository, poll_id.clone())
+        Ok(start_sse(poll_repository, poll_id.clone(), user_id)
             .await
             .into_response())
     } else {
-        Ok(get_poll_result_by_id(poll_repository, poll_id)
+        Ok(get_poll_result_by_id(poll_repository, poll_id, user_id)
             .await?
             .into_response())
     }
@@ -280,6 +285,7 @@ pub async fn get_poll_result(
 pub async fn start_sse(
     poll_repository: PollRepository,
     poll_id: String,
+    user_id: String,
 ) -> Sse<impl Stream<Item = Result<Event, AppError>>> {
     // Create a stream that fetches poll results every second
     let stream =
@@ -287,6 +293,7 @@ pub async fn start_sse(
             .then(move |_| {
                 let poll_repo = poll_repository.clone();
                 let poll_id = poll_id.clone();
+                let user_id = user_id.clone();
 
                 async move {
                     match poll_repo.get_poll_results(poll_id).await {
@@ -319,6 +326,7 @@ pub async fn start_sse(
 pub async fn get_poll_result_by_id(
     poll_repository: PollRepository,
     poll_id: String,
+    user_id: String,
 ) -> Result<Json<ApiResponse<PollResponseDTO>>, AppError> {
     let poll = poll_repository.get_poll_results(poll_id).await?;
 
