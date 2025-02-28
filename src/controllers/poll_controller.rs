@@ -266,20 +266,31 @@ pub async fn get_poll_result(
 ) -> Result<Response, AppError> {
     let poll_repository = poll_repository::PollRepository::new(db);
 
-    // Validate the authentication token
-    let user_id = get_user_id_from_token(authorization.token()).await?;
-
-    // There are 3 cases to get the results
-    //* Live results -> Stream The Votes of the given poll_id
+    // Check if live mode is requested
     if let Some(true) = filters.live {
-        Ok(start_sse(poll_repository, poll_id.clone(), user_id)
-            .await
-            .into_response())
+        // Redirect to use the dedicated live endpoint instead
+        return Err(AppError::Poll(PollsError::UseAlternativeEndpoint));
     } else {
+        // Validate the authentication token
+        let user_id = get_user_id_from_token(authorization.token()).await?;
         Ok(get_poll_result_by_id(poll_repository, poll_id, user_id)
             .await?
             .into_response())
     }
+}
+
+//*GET:: api/polls/poll_id/results/live
+pub async fn get_poll_live_results(
+    Extension(db): Extension<Arc<Database>>,
+    Path(poll_id): Path<String>,
+) -> Result<Response, AppError> {
+    let poll_repository = poll_repository::PollRepository::new(db);
+
+    // No authentication required for live results
+    // We'll pass an empty string as user_id since we're not using it in the stream
+    Ok(start_sse(poll_repository, poll_id, String::new())
+        .await
+        .into_response())
 }
 
 pub async fn start_sse(
@@ -293,7 +304,6 @@ pub async fn start_sse(
             .then(move |_| {
                 let poll_repo = poll_repository.clone();
                 let poll_id = poll_id.clone();
-                let user_id = user_id.clone();
 
                 async move {
                     match poll_repo.get_poll_results(poll_id).await {

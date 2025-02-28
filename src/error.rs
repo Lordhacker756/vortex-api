@@ -92,6 +92,9 @@ pub enum PollsError {
 
     #[error("Cannot modify closed poll")]
     CannotModifyClosed,
+
+    #[error("Use alternative endpoint")]
+    UseAlternativeEndpoint,
 }
 
 #[derive(Error, Debug)]
@@ -200,6 +203,9 @@ impl IntoResponse for AppError {
                 }
                 PollsError::CannotModifyClosed => {
                     (StatusCode::FORBIDDEN, "Cannot Modify Closed Poll")
+                }
+                PollsError::UseAlternativeEndpoint => {
+                    (StatusCode::SEE_OTHER, "Use Alternative Endpoint")
                 }
             },
 

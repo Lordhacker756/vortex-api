@@ -4,7 +4,7 @@ use config::{
 };
 
 use dotenvy::dotenv;
-use middleware::auth::require_auth;
+
 use routes::poll_route::poll_router;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
@@ -47,10 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .nest("/api/auth", auth_router())
-        .nest(
-            "/api/polls",
-            poll_router().route_layer(axum::middleware::from_fn(require_auth)),
-        )
+        .nest("/api/polls", poll_router())
         .layer(init_cors())
         .layer(init_session())
         .layer(TraceLayer::new_for_http())
