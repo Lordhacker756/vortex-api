@@ -14,6 +14,7 @@ pub fn init_cors() -> CorsLayer {
             Method::PUT,
             Method::DELETE,
             Method::OPTIONS,
+            Method::PATCH,
         ])
         .allow_headers([
             HeaderName::from_static("content-type"),

@@ -8,7 +8,8 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use mongodb::Database;
 use std::{sync::Arc, time::Duration};
@@ -16,7 +17,10 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::{
     dtos::{
-        requests::{CreatePollDTO, ResultQueryParams, UpdatePollDTO, VoteQueryParam},
+        requests::{
+            CreatePollDTO, DateWithTimezone, ResultQueryParams, UpdatePollDTO, UpdatePollReq,
+            VoteQueryParam,
+        },
         responses::{ApiResponse, PollResponseDTO},
     },
     error::{AppError, JwtError, PollsError},
@@ -131,27 +135,45 @@ pub async fn update_poll_by_id(
     TypedHeader(authorization): TypedHeader<Authorization<Bearer>>,
     axum::Json(payload): axum::Json<UpdatePollDTO>,
 ) -> Result<Json<ApiResponse<String>>, AppError> {
+    // Adjust dates to preserve local time
+    // Parse the ISO dates directly - they already contain timezone information
+    let start_date = DateTime::parse_from_rfc3339(&payload.startDate)
+        .map_err(|_| {
+            AppError::Poll(PollsError::UpdateFailed(
+                "Invalid date format for start date".to_string(),
+            ))
+        })?
+        .with_timezone(&Utc);
+
+    let end_date = DateTime::parse_from_rfc3339(&payload.endDate)
+        .map_err(|_| {
+            AppError::Poll(PollsError::UpdateFailed(
+                "Invalid date format for start date".to_string(),
+            ))
+        })?
+        .with_timezone(&Utc);
+
+    // Use adjusted dates in your update logic
     let poll_repository = poll_repository::PollRepository::new(db);
-    let user_id = get_user_id_from_token(authorization.token()).await?;
+    let update_result = poll_repository
+        .update_poll(
+            poll_id,
+            UpdatePollReq {
+                name: payload.name,
+                isMulti: payload.isMulti,
+                startDate: start_date,
+                endDate: end_date,
+            },
+        )
+        .await?;
 
-    // Verify ownership
-    if !poll_repository
-        .verify_poll_owner(&poll_id, &user_id)
-        .await?
-    {
-        return Err(AppError::Poll(PollsError::Unauthorized));
-    }
-
-    match poll_repository.update_poll(poll_id, payload).await {
-        Ok(_) => Ok(Json(ApiResponse {
-            status: StatusCode::OK.as_u16() as i32,
-            message: String::from("Poll updated successfully"),
-            data: None,
-            timestamp: Utc::now(),
-            error: None,
-        })),
-        Err(e) => Err(e),
-    }
+    Ok(Json(ApiResponse {
+        status: http::StatusCode::OK.as_u16() as i32,
+        message: "Poll updated successfully".to_string(),
+        data: Some("Poll updated successfully".to_string()),
+        timestamp: Utc::now(),
+        error: None,
+    }))
 }
 
 //*GET:: api/polls/poll_id/vote

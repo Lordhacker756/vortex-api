@@ -32,7 +32,23 @@ pub struct CreatePollDTO {
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Clone)]
+pub struct DateWithTimezone {
+    pub date: DateTime<Utc>,
+    pub timezoneOffset: i32,
+}
+
+#[allow(non_snake_case)]
+#[derive(Deserialize, Clone)]
 pub struct UpdatePollDTO {
+    pub name: String,
+    pub isMulti: bool,
+    pub startDate: String,
+    pub endDate: String,
+}
+
+#[allow(non_snake_case)]
+#[derive(Deserialize, Clone)]
+pub struct UpdatePollReq {
     pub name: String,
     pub isMulti: bool,
     pub startDate: DateTime<Utc>,

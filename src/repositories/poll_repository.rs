@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::{
     dtos::{
-        requests::{CreatePollDTO, UpdatePollDTO},
+        requests::{CreatePollDTO, UpdatePollDTO, UpdatePollReq},
         responses::PollResponseDTO,
     },
     error::{AppError, PollsError},
@@ -25,34 +25,46 @@ impl PollRepository {
         Self { polls }
     }
 
-    pub async fn update_poll(&self, poll_id: String, poll: UpdatePollDTO) -> Result<(), AppError> {
+    pub async fn update_poll(&self, poll_id: String, poll: UpdatePollReq) -> Result<(), AppError> {
+        // Add debug logging
+        println!(
+            "Updating poll {} with dates: start={}, end={}",
+            poll_id,
+            poll.startDate.to_rfc3339(),
+            poll.endDate.to_rfc3339()
+        );
+
         // First check if poll exists and is not closed
         let _existing_poll = self
             .get_poll_by_id(poll_id.clone())
             .await?
             .ok_or(AppError::Poll(PollsError::PollNotFound))?;
 
+        // Add debug logging for MongoDB update
+        let update_doc = mongodb::bson::doc! {
+            "$set": {
+                "name": &poll.name,
+                "isMulti": poll.isMulti,
+                "startDate": BsonDateTime::from_millis(poll.startDate.timestamp_millis()),
+                "endDate": BsonDateTime::from_millis(poll.endDate.timestamp_millis())
+            }
+        };
+
+        println!("MongoDB update document: {:?}", update_doc);
+
         let update_result = self
             .polls
-            .update_one(
-                mongodb::bson::doc! { "pollId": poll_id },
-                mongodb::bson::doc! {
-                    "$set": {
-                    "name": poll.name,
-                    "isMulti": poll.isMulti,
-                    "startDate": BsonDateTime::from_millis(poll.startDate.timestamp_millis()),
-                    "endDate": BsonDateTime::from_millis(poll.endDate.timestamp_millis())
-                    }
-                },
-            )
+            .find_one_and_update(mongodb::bson::doc! { "pollId": poll_id }, update_doc)
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
-        if update_result.modified_count == 0 {
-            return Err(AppError::Poll(PollsError::PollNotFound));
+        match update_result {
+            Some(updated_poll) => {
+                println!("Updated document: {:?}", updated_poll);
+                Ok(())
+            }
+            None => Err(AppError::Poll(PollsError::PollNotFound)),
         }
-
-        Ok(())
     }
 
     pub async fn get_polls_of_user(
