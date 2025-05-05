@@ -26,14 +26,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     dotenv().ok();
 
+    // Initialize logging
+    initialize_logger();
+
     // Verify JWT_SECRET is set
     if std::env::var("JWT_SECRET").is_err() {
         error!("JWT_SECRET environment variable not set");
         std::process::exit(1);
     }
-
-    // Initialize logging
-    initialize_logger();
 
     info!("🚀 Server starting initialization...");
 
